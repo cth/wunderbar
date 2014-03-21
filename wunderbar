@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+
+require_relative 'df.rb'
+require_relative 'genotypes.rb'
+require_relative 'matcher.rb'
+
+#puts barcoding_snps.genotypes.inspect
+#puts barcoding_snps.snps_index
+
+def print_help
+	puts "Usage: wunderbar [options] barcoding-snps-plink-stem test-snps-plink-stem [single-mismatch-file] [swap-match-file]"
+#	puts "Options:"
+#	puts "--match-p NUM : Cut-off p-value for single matches" 
+#	puts "--match-e NUM : Cut-off e-value for single matches" 
+end
+
+puts ARGV.inspect
+
+begin
+	raise "Insufficient arguments given!" if ARGV.size < 3
+rescue => e
+	puts "!" + e.to_s
+	print_help
+end
+
+# parse options
+
+
+single_mismatch_file = ARGV[2].nil? ? "mismatch.txt" : ARGV[2]
+swap_match_file = ARGV[3].nil? ? "swaps.txt" : ARGV[3]
+
+
+puts ARGV[0]
+puts ARGV[1]
+matcher = Matcher.new(ARGV[0], ARGV[1])
+
+# single individual match
+matcher.match_snps
+matcher.create_match_report(single_mismatch_file)
+
+# swap match
+matcher.swap_match
+matcher.create_swaps_report(swap_match_file)
