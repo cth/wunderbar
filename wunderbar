@@ -9,35 +9,48 @@ require_relative 'matcher.rb'
 
 def print_help
 	puts "Usage: wunderbar [options] barcoding-snps-plink-stem test-snps-plink-stem [single-mismatch-file] [swap-match-file]"
-#	puts "Options:"
-#	puts "--match-p NUM : Cut-off p-value for single matches" 
-#	puts "--match-e NUM : Cut-off e-value for single matches" 
-end
-
-puts ARGV.inspect
-
-begin
-	raise "Insufficient arguments given!" if ARGV.size < 3
-rescue => e
-	puts "!" + e.to_s
-	print_help
+	puts "Options:"
+	puts "--file plinkstem : The genotypes to be tested (mandatory)"
+	puts "--barcode-file plinkstem : barcode genotypes (mandatory)"
+	puts "--out : outfile prefix"
+	puts "--match-p 0..1 : Maximum p-value for single matches (default 0.05)"
+	puts "--match-e 0..1 : Maximum e-value for single matches (default 0.01)"
+	puts "--erate 0..1 : Minimum rate of mismatches (default 0)"
+	puts "--mcmc NUM : ..." 
 end
 
 # parse options
+mandatory_fields = [ "file", "barcode-file" ]
+@config = {}
 
+loop do 
+	break if ARGV.size == 0
+	if ARGV[0] =~ /--(.*)/ then
+		@config[$1] = ARGV[1]
+		2.times { ARGV.shift } 
+	else
+		throw "unknown option #{ARGV[0]}"
+	end
+end
 
-single_mismatch_file = ARGV[2].nil? ? "mismatch.txt" : ARGV[2]
-swap_match_file = ARGV[3].nil? ? "swaps.txt" : ARGV[3]
+@config["out"] ||= "wunderbar" 
+@config["match-p"] ||= 0.05
+@config["match-e"] ||= 0.01
 
+mandatory_fields.each do |field|
+	throw "Missing mandatory field --#{field} is missing." if @config[field].nil?
+end
 
-puts ARGV[0]
-puts ARGV[1]
-matcher = Matcher.new(ARGV[0], ARGV[1])
+puts "Options in use:"
+puts @config.inspect
+puts
+
+matcher = Matcher.new(@config) 
 
 # single individual match
 matcher.match_snps
-matcher.create_match_report(single_mismatch_file)
+matcher.create_match_report(@config["out"] + ".mismatch")
 
 # swap match
 matcher.swap_match
-matcher.create_swaps_report(swap_match_file)
+matcher.create_swaps_report(@config["out"] + ".swaps")
