@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require_relative 'df.rb'
+require_relative 'utils.rb'
 require_relative 'genotypes.rb'
 require_relative 'matcher.rb'
 
@@ -36,6 +37,7 @@ end
 @config["out"] ||= "wunderbar" 
 @config["match-p"] ||= 0.05
 @config["match-e"] ||= 0.01
+@config["mcmc-factor"] ||= 10 
 
 mandatory_fields.each do |field|
 	throw "Missing mandatory field --#{field} is missing." if @config[field].nil?

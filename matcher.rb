@@ -2,18 +2,19 @@ require 'progressbar'
 
 class Matcher
 	# Initialize with 
-	def initialize(test_genotypes_plink12, bar_genotypes_plink12)
+	def initialize(config) 
+		@config = config
 		# Read all barcoding genotypes from plink files
-		@barcode_genotypes = Genotypes.new(bar_genotypes_plink12)
+		@barcode_genotypes = Genotypes.new(@config["barcode-file"])
 		# Read only barcoding genotypes from testset plink files
-		@test_genotypes = Genotypes.new(test_genotypes_plink12,@barcode_genotypes.snps)
+		@test_genotypes = Genotypes.new(@config["file"],@barcode_genotypes.snps)
 		puts "barcodes: " + @barcode_genotypes.to_s
 		puts "test snps: " + @test_genotypes.to_s
 	end
 
 	# returns true if value is nil or zero
-	def nil_or_zero(x)
-		x.nil? or x==0
+	def nilz(x)
+		x.nil? or x==0 
 	end
 
 	# Match each SNP to its equivalent SNP in other dataset
@@ -29,7 +30,7 @@ class Matcher
 			pbar.inc
 			matching,mismatch,unknown = 0,0,0
 			@test_genotypes.each_by_snp(snp) do |indv,gt|
-				if not @barcode_genotypes.include_individual?(indv) or nil_or_zero(gt) or nil_or_zero(@barcode_genotypes[indv,snp]) then
+				if not @barcode_genotypes.include_individual?(indv) or nilz(gt) or nilz(@barcode_genotypes[indv,snp]) then
 					unknown = unknown + 1
 				elsif gt == @barcode_genotypes[indv,snp] 
 					matching = matching + 1
@@ -56,7 +57,9 @@ class Matcher
 				avg_samples = (snps.map { |snp| @snp_stats[snp][:total] }).inject { |r,v| r+v } / snps.size.to_f
 				# Calculate e-value:
 				evalue = avg_samples * pvalue
-				file.puts "#{particid}\t#{numsnps}\t#{numsnps.to_f/@barcode_genotypes.snps.size}\t#{pvalue}\t#{evalue}"
+				if pvalue < @config["match-p"].to_f and evalue < @config["match-e"].to_f
+					file.puts "#{particid}\t#{numsnps}\t#{numsnps.to_f/@barcode_genotypes.snps.size}\t#{pvalue}\t#{evalue}"
+				end
 			end
 		end
 		puts "#{@mismatches.size} samples with barcoding errors written to #{output_file}"
@@ -66,18 +69,20 @@ class Matcher
 		# Construct alignment matrix between all mismatching samples
 		@swaps = []
 		pbar = ProgressBar.new("Swap matching", @barcode_genotypes.individuals.size * @test_genotypes.individuals.size)
-		@barcode_genotypes.individuals.each do |indv_a|
-			@test_genotypes.individuals.each do |indv_b|
+		@barcode_genotypes.individuals.each do |indv_bar|
+			@test_genotypes.individuals.each do |indv_test|
 				pbar.inc
-				next if indv_a == indv_b
+				next if indv_bar == indv_test
+
+				next unless @mismatches.include?(indv_bar) 
 
 				unknown = 0
 				matching = []
 				mismatch = []
-				@test_genotypes.each_by_indv(indv_a) do |snp,gt|
-					other_gt = @barcode_genotypes[indv_b,snp] 
+				@test_genotypes.each_by_indv(indv_bar) do |snp,gt|
+					other_gt = @barcode_genotypes[indv_test,snp] 
 
-					if nil_or_zero(gt) or nil_or_zero(other_gt) then
+					if nilz(gt) or nilz(other_gt) then
 						unknown = unknown + 1
 					elsif gt == other_gt then
 						matching << [ snp, gt ]
@@ -90,13 +95,13 @@ class Matcher
 				# p-value for match: Product of all the genotype frequencies (in @test_genotypes) for matching SNPs 
 				p_value = 1
 				matching.each { |snp,gt| p_value = p_value * @test_genotypes.snp_freq[snp][gt] }
-				next if p_value >= 1
+				next if p_value > @config["match-p"].to_f
 					
-				#pvalue_adjust = mcmc_adjust(mismatch,indv_a,indv_b) 
-				pvalue_adjust = 0 
+				inf_factor = ld_inflation_factor(mismatch,matching,p_value) unless @config["mcmc"].nil?
+				p_value = p_value * inf_factor 
 
 				if p_value <= 0.05 then
-					@swaps << { :original_label => indv_b, :new_label => indv_a, :pvalue => p_value + pvalue_adjust, :adjust => pvalue_adjust, :evalue => mismatch.size*p_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
+					@swaps << { :original_label => indv_test, :new_label => indv_bar, :pvalue => p_value , :ld_inflation_factor => inf_factor , :evalue => mismatch.size*p_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
 				end
 			end
 		end
@@ -104,8 +109,8 @@ class Matcher
 	end
 
 	def create_swaps_report(out_file)
-		if @swaps.nil? then 
-			puts "No swap detected"
+		if @swaps.size == 0 then 
+			puts "No swaps detected"
 		else 
 			File.open(out_file, "w") do |file|
 				keys = @swaps.first.keys
@@ -116,53 +121,47 @@ class Matcher
 		end
 	end
 
-	# Monte Carlo simulation to calculate how often
-	# we get a "match" p-value at least as extreme with as many matching snps
-	def mcmc_adjust(mismatch,indv)
-		adjust = 0
-		if mismatch.size > 0 then
-			binomials = []
-			mismatch.size.downto(1) { |x| binomials << Binomial.new(mismatch.size + matching.size,x) }
-			binomial_probs = normalize_cnts(binomials.map { |x| x.to_i } )
-			smaller_probs = []
-			larger_probs = []
-			trials = 100*(1.to_f/p_value).to_i
-			puts "trials: #{trials}"
-			puts binomial_probs.inspect
-			1.upto(trials) do |i|
-				# Randomly select binom.bottom barcoding snps and calculate match probability	
-				# record numbers of times that it is better or worse than matching p-value respective
+	# Some SNPs may in close LD, in which case we would expect
+	# an overrepresentation of certain patterns of genotypes in @test_genotypes 
+	# p.values are calculated assuming independence. This fn calculates a factor to adjust for this.
+	def ld_inflation_factor(mismatches,matches,p_value)
+		avg_inflation_ratio = 1
+		if mismatches.size > 0 then
+			snp_subset_sizes = []
+			# Create sample distribution of binomials
+			mismatches.size.downto(2) { |x| snp_subset_sizes << x }
+			inflation_ratios = []
+			# Scale number of trials relative to extremity of p-value
+			# FIXME: 100 should be a configurable factor
+			1.upto(@config["mcmc"].to_i) do |i|
+				# randomly select number of snps in subset
+				num_snps = snp_subset_sizes.random_select() 
 
-				binom = binomials.random_select(binomial_probs)
+				# Sample a corresponding number of the matching SNPs
+				sampled_snps = matches.sample_n(num_snps)
 
-				# uniform probability for selection of each snp 
-				sample_probs = @test_genotypes.snps.map { |x| 1.to_f / @test_genotypes.snps.size } 
+				# Count number of matches for this subset 
+				num_match = 0 
+				@test_genotypes.individuals.each do |indv|
+					# map snps to match truth value and logical and 
+					if (sampled_snps.map { |snp,gt| gt == @test_genotypes[indv,snp] }).inject { |a,b| a and b } then
+						num_match = num_match + 1 
+					end
+				end
+				# We do not correct if num_match is zero
+				next if num_match == 0
 
-				# sample n snps: 
-				sampled_snps =  @test_genotypes.snps.sample_n(binom.bottom,sample_probs) 
-	
 				# calculate probability of seeing by chance
-				prob = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][gt] }
-				next if  prob.include?(nil) # FIXME: potential problem
-				prob = prob.inject { |a,b| a*b }
+				snp_probs = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][gt] }
+				next if  snp_probs.include?(nil) # FIXME: this can happen if the barcode includes a genotype not included in @test_genotypes
+				expected_match_prob = snp_probs.inject { |a,b| a*b }
+				expected_match = expected_match_prob * @test_genotypes.individuals.size 
 
-				# Put probaility into "smaller" bucket or "bigger" bucket
-				if prob > p_value then
-					larger_probs << prob
-				else
-					smaller_probs << prob
-				end
-
-				# Adjust p-value
-				if smaller_probs.empty? then
-					adjust = 0
-				else
-					fraction_smaller = smaller_probs.sum.to_f / (smaller_probs.sum + larger_probs.sum)
-					mean_smaller = smaller_probs.sum / smaller_probs.size
-					adjust = mean_smaller * fraction_smaller * (binomials.map { |b| b.to_i }).sum
-				end
+				inflation_ratios <<  num_match / expected_match 
 			end
+			avg_inflation_ratio = inflation_ratios.inject { |a,b| a+b } / inflation_ratios.size
+			puts avg_inflation_ratio
 		end
-		adjust
+		avg_inflation_ratio
 	end
 end

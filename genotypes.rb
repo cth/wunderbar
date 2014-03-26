@@ -33,7 +33,7 @@ class Genotypes
 		File.open(plinkstem + ".ped") do |ped|
 			ped.each do |line|
 				fields = line.chomp.split("\t")
-				@individuals << fields.first
+				@individuals << fields[0] + " " + fields[1]
 				6.times { fields.shift }  # Skip sample information fields
 				throw "Mismatch in number of genotypes #{fields.size} != #{@snps.size}" unless fields.size == @snps.size
 				# Select relevant fields
