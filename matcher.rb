@@ -45,6 +45,23 @@ class Matcher
 			@snp_stats[snp] = { :match => matching, :mismatch => mismatch, :missing => unknown, :total => matching+mismatch+unknown }
 		end
 		pbar.finish
+		# calculate e-values and p-values
+		@individual_match = {}
+		@test_genotypes.individuals.each do |indv|
+			pvalue = 1
+			if @mismatches[indv].nil? then
+				evalue = "NA" 
+			else
+				@mismatches[indv].each do |snp| 
+					pvalue = pvalue  * (@snp_stats[snp][:mismatch].to_f / @snp_stats[snp][:total].to_f)
+				end
+				# Ok, this is messy. We want to take into account that some SNPs may be missing.
+				avg_samples = (@mismatches[indv].map { |snp| @snp_stats[snp][:total] }).inject { |r,v| r+v } / @mismatches[indv].size.to_f
+				evalue = pvalue * avg_samples
+			end
+			@individual_match[indv] = { :pvalue => pvalue, :evalue => evalue } 
+		end
+		puts @individual_match.inspect
 	end
 
 	def create_match_report(output_file)
@@ -106,11 +123,12 @@ class Matcher
 				p_value = (p_value > 1) ? 1 : p_value # cap p-value at 1
  
 				e_value = mismatch.size*p_value
+
+				posterior_prob = (1-p_value) * (@config[:peturb]+(1-@individual_match[indv_bar][:pvalue])) * (@config[:peturb]+(1-@individual_match[indv_test][:pvalue]))
+
 				next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
 
-#				if p_value <= 0.05 then
-					@swaps << { :original_label => indv_test, :new_label => indv_bar, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
-#				end
+				@swaps << { :original_label => indv_test, :new_label => indv_bar, :posterior => posterior_prob, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
 			end
 		end
 		pbar.finish
@@ -120,11 +138,29 @@ class Matcher
 		if @swaps.size == 0 then 
 			puts "No swaps detected"
 		else 
+			keys = @swaps.first.keys
+			swaps = @swaps.sort do |a,b| 
+				if a[:posterior] == b[:posterior] then
+					b[:pvalue] <=> a[:pvalue]
+				else
+					a[:posterior] <=> b[:posterior]
+				end
+			end.reverse
 			File.open(out_file, "w") do |file|
-				keys = @swaps.first.keys
 				file.puts (keys.map { |x| x.upcase }).join("\t")
-				swaps = @swaps.sort { |a,b| a[:pvalue] <=> b[:pvalue] } 
 				swaps.each { |swp| file.puts (keys.map { |k| swp[k] }).join("\t") }
+			end
+
+			if not @config[:dot_file].nil? then 
+				File.open(@config[:dot_file], "w") do |dot_file|
+					dot_file.puts "digraph G {"
+						swaps.each do |swp|
+							if swp[:posterior] > 0.95 then
+								dot_file.puts '"' + swp[:original_label] +  '" -> "' + swp[:new_label] + '"'
+							end
+						end
+					dot_file.puts "}"
+				end
 			end
 		end
 	end

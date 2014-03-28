@@ -49,13 +49,21 @@ OptionParser.new do |opts|
 	end
 
 	opts.on("--mismatch-probability P", "Prior mismatch probability") do |p|
-		@config[:mismatch_probability] = p 
+		@config[:mismatch_probability] = p.to_f
 	end
 
 	opts.on("-w", "--mismatch-probability-weight W", "How much confidence to put in the given mismatch-probability relative to estimation from data.") do |p|
-		@config[:mismatch_probability_weight] = p
+		@config[:mismatch_probability_weight] = p.to_f
 	end
 
+	@config[:peturb] = 0
+	opts.on("--peturb 0..1", "A very small pertubation constant to ensure that no sample gets zero mismatch probability") do |p|
+		@config[:peturb] = p.to_f
+	end
+
+	opts.on("--dot-file file", "Create .dot file for GraphViz to visualize swaps") do |file|
+		@config[:dot_file] = file
+	end
 end.parse!
 
 # parse options
