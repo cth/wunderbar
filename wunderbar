@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require 'optparse'
 require_relative 'df.rb'
 require_relative 'utils.rb'
 require_relative 'genotypes.rb'
@@ -8,40 +9,63 @@ require_relative 'matcher.rb'
 #puts barcoding_snps.genotypes.inspect
 #puts barcoding_snps.snps_index
 
-def print_help
-	puts "Usage: wunderbar [options] barcoding-snps-plink-stem test-snps-plink-stem [single-mismatch-file] [swap-match-file]"
-	puts "Options:"
-	puts "--file plinkstem : The genotypes to be tested (mandatory)"
-	puts "--barcode-file plinkstem : barcode genotypes (mandatory)"
-	puts "--out : outfile prefix"
-	puts "--match-p 0..1 : Maximum p-value for single matches (default 0.05)"
-	puts "--match-e 0..1 : Maximum e-value for single matches (default 0.01)"
-	puts "--erate 0..1 : Minimum rate of mismatches (default 0)"
-	puts "--mcmc NUM : ..." 
-end
-
-# parse options
-mandatory_fields = [ "file", "barcode-file" ]
 @config = {}
 
-loop do 
-	break if ARGV.size == 0
-	if ARGV[0] =~ /--(.*)/ then
-		@config[$1] = ARGV[1]
-		2.times { ARGV.shift } 
-	else
-		throw "unknown option #{ARGV[0]}"
+OptionParser.new do |opts|
+	opts.on( '-h', '--help', 'Display this screen' ) do
+		puts opts
+		exit
 	end
-end
 
-@config["out"] ||= "wunderbar" 
-@config["match-p"] ||= 0.05
-@config["match-e"] ||= 0.01
-@config["mcmc-factor"] ||= 10 
+	opts.on("-f", "--file plinkstem", "The genotypes to be tested") do |f|
+		@config[:file] = f
+	end
+
+	opts.on("-b", "--barcode-file plinkstem", "The barcode genotypes") do |f|
+		@config[:barcode_file] = f
+
+	end
+
+	opts.on("-o", "--out file", "Prefix of the output files") do |f|
+		@config[:out] = f || "wunderbar"
+	end
+
+	@config[:p_max] = 1.0
+	opts.on("-p", "--p-max 0..1", "Maximum p-value for single matches (default 1)") do |p|
+		@config[:p_max] = p.to_f 
+	end
+
+	@config[:e_max] = 1.0
+	opts.on("-e", "--e-max 0..1", "Maximum e-value for single matches (default 1)") do |e|
+		@config[:e_max] = e.to_f
+	end
+
+	opts.on("-la", "--ld-adjust iterations", "Adjust for population LD structure between barcoding SNPs. Default number of iterations is 0 (Assume no LD). The more iterations the more precise the adjustment.") do |ld|
+		@config[:ld_adjust] = ld || 0
+	end
+
+	opts.on("--mismatch-adjust iterations", "Adjust p-value using mismatch combinatorial p-value distribution. This should give more realistic p-values for swaps. The more iterations the more precise the adjustment. Recommended at least 10000 iterations.") do |m|
+		@config[:mismatch_adjust] = m || 0
+	end
+
+	opts.on("--mismatch-probability P", "Prior mismatch probability") do |p|
+		@config[:mismatch_probability] = p 
+	end
+
+	opts.on("-w", "--mismatch-probability-weight W", "How much confidence to put in the given mismatch-probability relative to estimation from data.") do |p|
+		@config[:mismatch_probability_weight] = p
+	end
+
+end.parse!
+
+# parse options
+mandatory_fields = [ :file, :barcode_file ]
 
 mandatory_fields.each do |field|
 	throw "Missing mandatory field --#{field} is missing." if @config[field].nil?
 end
+
+@config[:out] ||= "wunderbar"
 
 puts "Options in use:"
 puts @config.inspect
@@ -51,8 +75,8 @@ matcher = Matcher.new(@config)
 
 # single individual match
 matcher.match_snps
-matcher.create_match_report(@config["out"] + ".mismatch")
+matcher.create_match_report(@config[:out] + ".mismatch")
 
 # swap match
 matcher.swap_match
-matcher.create_swaps_report(@config["out"] + ".swaps")
+matcher.create_swaps_report(@config[:out] + ".swaps")

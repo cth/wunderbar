@@ -5,11 +5,14 @@ class Matcher
 	def initialize(config) 
 		@config = config
 		# Read all barcoding genotypes from plink files
-		@barcode_genotypes = Genotypes.new(@config["barcode-file"])
+		@barcode_genotypes = Genotypes.new(@config[:barcode_file])
 		# Read only barcoding genotypes from testset plink files
-		@test_genotypes = Genotypes.new(@config["file"],@barcode_genotypes.snps)
+		@test_genotypes = Genotypes.new(@config[:file],@barcode_genotypes.snps)
 		puts "barcodes: " + @barcode_genotypes.to_s
 		puts "test snps: " + @test_genotypes.to_s
+
+		puts "Sampling p-value distributions for mismatch binomials:"
+		sample_mismatch_distributions( @config[:mismatch_adjust].to_i )
 	end
 
 	# returns true if value is nil or zero
@@ -21,7 +24,6 @@ class Matcher
 	# This is to check that snp-wise correspondance is ok
 	# If this is ok, we can then use to detect outlying individuals
 	def match_snps
-
 		@snp_stats = {}
 		@mismatches = {}
 
@@ -41,7 +43,6 @@ class Matcher
 				end
 			end
 			@snp_stats[snp] = { :match => matching, :mismatch => mismatch, :missing => unknown, :total => matching+mismatch+unknown }
-			#puts "snp=#{snp} matching=#{matching} mismatch=#{mismatch} unknown=#{unknown}"
 		end
 		pbar.finish
 	end
@@ -57,7 +58,7 @@ class Matcher
 				avg_samples = (snps.map { |snp| @snp_stats[snp][:total] }).inject { |r,v| r+v } / snps.size.to_f
 				# Calculate e-value:
 				evalue = avg_samples * pvalue
-				if pvalue < @config["match-p"].to_f and evalue < @config["match-e"].to_f
+				if pvalue < @config[:p_max] and evalue < @config[:e_max]
 					file.puts "#{particid}\t#{numsnps}\t#{numsnps.to_f/@barcode_genotypes.snps.size}\t#{pvalue}\t#{evalue}"
 				end
 			end
@@ -74,7 +75,7 @@ class Matcher
 				pbar.inc
 				next if indv_bar == indv_test
 
-				next unless @mismatches.include?(indv_bar) 
+				#next unless @mismatches.include?(indv_bar) 
 
 				unknown = 0
 				matching = []
@@ -95,14 +96,21 @@ class Matcher
 				# p-value for match: Product of all the genotype frequencies (in @test_genotypes) for matching SNPs 
 				p_value = 1
 				matching.each { |snp,gt| p_value = p_value * @test_genotypes.snp_freq[snp][gt] }
-				next if p_value > @config["match-p"].to_f
+				#mismatch.each { |snp,gt| p_value = p_value * binomial(@barcode_genotypes.snps.size,mismatch.size) }
 					
-				inf_factor = ld_inflation_factor(mismatch,matching,p_value) unless @config["mcmc"].nil?
-				p_value = p_value * inf_factor 
+				p_value = p_value * Binomial.new(matching.size + mismatch.size, matching.size).to_i
 
-				if p_value <= 0.05 then
-					@swaps << { :original_label => indv_test, :new_label => indv_bar, :pvalue => p_value , :ld_inflation_factor => inf_factor , :evalue => mismatch.size*p_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
-				end
+				inf_ratio = ld_inflation_ratio(mismatch,matching,p_value)
+				p_value = p_value * inf_ratio
+				
+				p_value = (p_value > 1) ? 1 : p_value # cap p-value at 1
+ 
+				e_value = mismatch.size*p_value
+				next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
+
+#				if p_value <= 0.05 then
+					@swaps << { :original_label => indv_test, :new_label => indv_bar, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
+#				end
 			end
 		end
 		pbar.finish
@@ -124,7 +132,7 @@ class Matcher
 	# Some SNPs may in close LD, in which case we would expect
 	# an overrepresentation of certain patterns of genotypes in @test_genotypes 
 	# p.values are calculated assuming independence. This fn calculates a factor to adjust for this.
-	def ld_inflation_factor(mismatches,matches,p_value)
+	def ld_inflation_ratio(mismatches,matches,p_value)
 		avg_inflation_ratio = 1
 		if mismatches.size > 0 then
 			snp_subset_sizes = []
@@ -132,8 +140,7 @@ class Matcher
 			mismatches.size.downto(2) { |x| snp_subset_sizes << x }
 			inflation_ratios = []
 			# Scale number of trials relative to extremity of p-value
-			# FIXME: 100 should be a configurable factor
-			1.upto(@config["mcmc"].to_i) do |i|
+			1.upto(@config[:ld_adjust].to_i) do |i|
 				# randomly select number of snps in subset
 				num_snps = snp_subset_sizes.random_select() 
 
@@ -159,9 +166,37 @@ class Matcher
 
 				inflation_ratios <<  num_match / expected_match 
 			end
-			avg_inflation_ratio = inflation_ratios.inject { |a,b| a+b } / inflation_ratios.size
-			puts avg_inflation_ratio
+			avg_inflation_ratio = inflation_ratios.sum / inflation_ratios.size if @config[:ld_adjust].to_i > 0
 		end
 		avg_inflation_ratio
+	end
+
+	
+	def sample_mismatch_distributions(iterations)
+		binomials = []
+		(@barcode_genotypes.snps.size-1).downto(1) { |x| binomials << Binomial.new(@barcode_genotypes.snps.size,x) }
+		@pvalue_distribution=[]
+		binomials.each { |b| @pvalue_distribution[b.bottom] = sample_pvalues(b,iterations) }
+	end
+
+	def sample_pvalues(binom,iterations)
+		sampled_pvalues = []
+ 
+		pbar = ProgressBar.new("#{binom.to_s}", iterations)
+
+		# Run sampling
+		1.upto(iterations) do |i|
+			pbar.inc
+			# sample n snps and calculate probability of seeing by chance 
+			# uniform probability for selection of each snp and genotype within snp 
+			# TODO: Should it be uniform with snp??
+			sample_probs = @test_genotypes.snps.map { |x| 1.to_f / @test_genotypes.snps.size }
+			sampled_snps =  @test_genotypes.snps.sample_n(binom.bottom,sample_probs)
+			probs = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][[0,1,2,3].random_select()] }
+			pvalue = probs.inject { |a,b| a*b }
+			sampled_pvalues << pvalue
+		end
+		pbar.finish
+		sampled_pvalues
 	end
 end

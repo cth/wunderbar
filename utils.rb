@@ -49,7 +49,7 @@ class Array
 
 	def sample_n(n,probs=nil)
 		samples = []
-		throw "Cannot samples #{n} from and array of size #{self.size}" if n > self.size
+		throw "Cannot samples #{n} from an array of size #{self.size}" if n > self.size
 		while samples.size != n
 			e = self.random_select(probs)
 			samples << e unless samples.include?(e)
