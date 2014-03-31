@@ -87,5 +87,3 @@ def make_numeric_geno
 		end
 	end
 end
-
-

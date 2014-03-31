@@ -114,4 +114,14 @@ class Genotypes
 		"#{individuals.size}x#{snps.size} genotype matrix"
 		#"#{individuals.size}x#{snps.size} genotype matrix #{snps.inspect}"
 	end
+
+	# Create a random set of genotypes for one individual, in corrspondence with genotype frequencies
+	def random_sample
+		snp_genotypes = {} 
+		@snps.each do |snp|
+			probs = normalize_cnts([1,2,3].map { |gt| @snp_freq[snp][gt] })
+			snp_genotypes[snp] = [1,2,3].random_select(probs)
+		end
+		snp_genotypes
+	end
 end

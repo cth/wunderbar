@@ -11,8 +11,12 @@ class Matcher
 		puts "barcodes: " + @barcode_genotypes.to_s
 		puts "test snps: " + @test_genotypes.to_s
 
-		puts "Sampling p-value distributions for mismatch binomials:"
-		sample_mismatch_distributions( @config[:mismatch_adjust].to_i )
+		#puts "Sampling p-value distributions for mismatch binomials:"
+		#sample_mismatch_distributions( @config[:mismatch_adjust].to_i )
+		File.open("pvalues.txt", "w") do |file|
+			@pscores = random_match_scores
+			@pscores.each { |i| file.puts i }
+		end
 	end
 
 	# returns true if value is nil or zero
@@ -61,7 +65,6 @@ class Matcher
 			end
 			@individual_match[indv] = { :pvalue => pvalue, :evalue => evalue } 
 		end
-		puts @individual_match.inspect
 	end
 
 	def create_match_report(output_file)
@@ -111,18 +114,26 @@ class Matcher
 
 				total = matching.size + unknown + mismatch.size 
 				# p-value for match: Product of all the genotype frequencies (in @test_genotypes) for matching SNPs 
-				p_value = 1
-				matching.each { |snp,gt| p_value = p_value * @test_genotypes.snp_freq[snp][gt] }
-				#mismatch.each { |snp,gt| p_value = p_value * binomial(@barcode_genotypes.snps.size,mismatch.size) }
-					
-				p_value = p_value * Binomial.new(matching.size + mismatch.size, matching.size).to_i
+				p_score = 1
+				matching.each { |snp,gt| p_score = p_score * @test_genotypes.snp_freq[snp][gt] }
+				inf_ratio = ld_inflation_ratio(mismatch,matching,p_score)
+				p_score = p_score * ld_inflation_ratio(mismatch,matching,p_score)
 
-				inf_ratio = ld_inflation_ratio(mismatch,matching,p_value)
-				p_value = p_value * inf_ratio
+				binomial_factor = 0
+				mismatch.size.downto(1) do |s|
+					binomial_factor = binomial_factor +  Binomial.new(matching.size+mismatch.size, mismatch.size).to_i
+				end
+				#p_score = p_score * binomial_factor
+
+
+				p_value = pscore_to_pvalue(p_score)
+					
+				#inf_ratio = ld_inflation_ratio(mismatch,matching,p_value)
+				#p_value = p_value * inf_ratio
 				
-				p_value = (p_value > 1) ? 1 : p_value # cap p-value at 1
+				#p_value = (p_value > 1) ? 1 : p_value # cap p-value at 1
  
-				e_value = mismatch.size*p_value
+				e_value = @test_genotypes.individuals.size*p_value
 
 				posterior_prob = (1-p_value) * (@config[:peturb]+(1-@individual_match[indv_bar][:pvalue])) * (@config[:peturb]+(1-@individual_match[indv_test][:pvalue]))
 
@@ -168,12 +179,13 @@ class Matcher
 	# Some SNPs may in close LD, in which case we would expect
 	# an overrepresentation of certain patterns of genotypes in @test_genotypes 
 	# p.values are calculated assuming independence. This fn calculates a factor to adjust for this.
+	# TODO: An underrepresentation of a subset pattern may also be indicative of LD  
 	def ld_inflation_ratio(mismatches,matches,p_value)
 		avg_inflation_ratio = 1
 		if mismatches.size > 0 then
 			snp_subset_sizes = []
 			# Create sample distribution of binomials
-			mismatches.size.downto(2) { |x| snp_subset_sizes << x }
+			matches.size.downto(2) { |x| snp_subset_sizes << x }
 			inflation_ratios = []
 			# Scale number of trials relative to extremity of p-value
 			1.upto(@config[:ld_adjust].to_i) do |i|
@@ -187,6 +199,7 @@ class Matcher
 				num_match = 0 
 				@test_genotypes.individuals.each do |indv|
 					# map snps to match truth value and logical and 
+					# FIXME: What is 'gt' in this? CHECK! May be error.
 					if (sampled_snps.map { |snp,gt| gt == @test_genotypes[indv,snp] }).inject { |a,b| a and b } then
 						num_match = num_match + 1 
 					end
@@ -200,20 +213,86 @@ class Matcher
 				expected_match_prob = snp_probs.inject { |a,b| a*b }
 				expected_match = expected_match_prob * @test_genotypes.individuals.size 
 
-				inflation_ratios <<  num_match / expected_match 
+				inf_ratio  = num_match / expected_match
+				inflation_ratios << inf_ratio
 			end
 			avg_inflation_ratio = inflation_ratios.sum / inflation_ratios.size if @config[:ld_adjust].to_i > 0
 		end
 		avg_inflation_ratio
 	end
 
+	def random_match_scores
+		p_scores = []
+		1000.times do
+			sample = @test_genotypes.random_sample()
+			@test_genotypes.individuals.sample_n(@test_genotypes.individuals.size / 10).each do |indv|
+				unknown = 0
+				matching = []
+				mismatch = []
+				@test_genotypes.each_by_indv(indv) do |snp,gt|
+					other_gt = sample[snp] 
+
+					if nilz(gt) or nilz(other_gt) then
+						unknown = unknown + 1
+					elsif gt == other_gt then
+						matching << [ snp, gt ]
+					else
+						mismatch << [ snp, gt ]
+					end
+				end
+				p_score = 1
+				matching.each { |snp,gt| p_score = p_score * @test_genotypes.snp_freq[snp][gt] }
+
+				binomial_factor = 0
+				mismatch.size.downto(1) do |s|
+					binomial_factor = binomial_factor +  Binomial.new(matching.size+mismatch.size, mismatch.size).to_i
+				end
+				p_score = p_score * binomial_factor
+				
+				p_scores << p_score
+			end
+		end
+		p_scores.sort
+	end
+
+	def pscore_to_pvalue(pscore)
+		left = 0
+		right = @pscores.size-1
+		i = right / 2
+		
+		while left != right and right - left != 1 
+			
+			#sleep(0.1)
+			#puts "#{i} #{left} #{right}"
+			if @pscores[i] < pscore then
+				left = i 
+			else
+				right = i
+			end
+			i = left + ((right - left) / 2).to_i
+		end
+		
+		ret = (1+i).to_f / @pscores.size.to_f
+		#puts "pscore = #{pscore} #{i} #{ret} #{@pscores.size}"
+		ret
+	end	
+
 	
 	def sample_mismatch_distributions(iterations)
 		binomials = []
 		(@barcode_genotypes.snps.size-1).downto(1) { |x| binomials << Binomial.new(@barcode_genotypes.snps.size,x) }
 		@pvalue_distribution=[]
-		binomials.each { |b| @pvalue_distribution[b.bottom] = sample_pvalues(b,iterations) }
+		binomials.each do |b| 
+			@pvalue_distribution[b.bottom] = sample_pvalues(b,iterations)
+			File.open(b.to_s,"w") do |f| 
+				@pvalue_distribution[b.bottom].each do |p|
+					f.puts p	
+				end
+			end
+		end
+
 	end
+
 
 	def sample_pvalues(binom,iterations)
 		sampled_pvalues = []
@@ -228,7 +307,7 @@ class Matcher
 			# TODO: Should it be uniform with snp??
 			sample_probs = @test_genotypes.snps.map { |x| 1.to_f / @test_genotypes.snps.size }
 			sampled_snps =  @test_genotypes.snps.sample_n(binom.bottom,sample_probs)
-			probs = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][[0,1,2,3].random_select()] }
+			probs = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][[0,1,2,3].random_select( @test_genotypes.snp_freq[snp])] }
 			pvalue = probs.inject { |a,b| a*b }
 			sampled_pvalues << pvalue
 		end
