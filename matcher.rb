@@ -1,4 +1,4 @@
-require 'progressbar'
+#require 'progressbar'
 
 class Matcher
 	# Initialize with 
@@ -31,9 +31,9 @@ class Matcher
 		@snp_stats = {}
 		@mismatches = {}
 
-		pbar = ProgressBar.new("Single barcode match", @barcode_genotypes.snps.size)
+		#pbar = ProgressBar.new("Single barcode match", @barcode_genotypes.snps.size)
 		@barcode_genotypes.snps.each do |snp|
-			pbar.inc
+			#pbar.inc
 			matching,mismatch,unknown = 0,0,0
 			@test_genotypes.each_by_snp(snp) do |indv,gt|
 				if not @barcode_genotypes.include_individual?(indv) or nilz(gt) or nilz(@barcode_genotypes[indv,snp]) then
@@ -49,7 +49,7 @@ class Matcher
 			@snp_stats[snp] = { :match => matching, :mismatch => mismatch, :missing => unknown, :total => matching+mismatch+unknown }
 		end
 
-		pbar.finish
+		#pbar.finish
 
 		# Sample from @snp_stats to get expected distribution
 		@sampled_mismatch_probs = []
@@ -112,10 +112,10 @@ class Matcher
 	def swap_match
 		# Construct alignment matrix between all mismatching samples
 		@swaps = []
-		pbar = ProgressBar.new("Swap matching", @barcode_genotypes.individuals.size * @test_genotypes.individuals.size)
+		#pbar = ProgressBar.new("Swap matching", @barcode_genotypes.individuals.size * @test_genotypes.individuals.size)
 		@barcode_genotypes.individuals.each do |indv_bar|
 			@test_genotypes.individuals.each do |indv_test|
-				pbar.inc
+				#pbar.inc
 				next if indv_bar == indv_test
 
 				#next unless @mismatches.include?(indv_bar) 
@@ -158,14 +158,16 @@ class Matcher
  
 				e_value = @test_genotypes.individuals.size*p_value
 
-				posterior_prob = (1-p_value) * (@config[:peturb]+(1-@individual_match[indv_bar][:pvalue])) * (@config[:peturb]+(1-@individual_match[indv_test][:pvalue]))
+
+				#posterior_prob = (1-p_value) * (@config[:peturb]+(1-@individual_match[indv_bar][:pvalue])) * (@config[:peturb]+(1-@individual_match[indv_test][:pvalue]))
+				posterior_prob = (1-p_score) * (@config[:peturb]+(1-@individual_match[indv_bar][:prob])) * (@config[:peturb]+(1-@individual_match[indv_test][:prob]))
 
 				next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
 
 				@swaps << { :original_label => indv_test, :new_label => indv_bar, :posterior => posterior_prob, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
 			end
 		end
-		pbar.finish
+		#pbar.finish
 	end
 
 	def create_swaps_report(out_file)
@@ -320,11 +322,11 @@ class Matcher
 	def sample_pvalues(binom,iterations)
 		sampled_pvalues = []
  
-		pbar = ProgressBar.new("#{binom.to_s}", iterations)
+		#pbar = ProgressBar.new("#{binom.to_s}", iterations)
 
 		# Run sampling
 		1.upto(iterations) do |i|
-			pbar.inc
+			#pbar.inc
 			# sample n snps and calculate probability of seeing by chance 
 			# uniform probability for selection of each snp and genotype within snp 
 			# TODO: Should it be uniform with snp??
@@ -334,7 +336,7 @@ class Matcher
 			pvalue = probs.inject { |a,b| a*b }
 			sampled_pvalues << pvalue
 		end
-		pbar.finish
+		#pbar.finish
 		sampled_pvalues
 	end
 end
