@@ -44,8 +44,8 @@ OptionParser.new do |opts|
 		@config[:ld_adjust] = ld || 0
 	end
 
-	opts.on("--mismatch-adjust iterations", "Adjust p-value using mismatch combinatorial p-value distribution. This should give more realistic p-values for swaps. The more iterations the more precise the adjustment. Recommended at least 10000 iterations.") do |m|
-		@config[:mismatch_adjust] = m || 0
+	opts.on("--sampling-iterations iterations", "Calculate p-value from mismatch probability distribution") do |m|
+		@config[:sampling_iterations] = m.to_i || 0
 	end
 
 	opts.on("--mismatch-probability P", "Prior mismatch probability") do |p|

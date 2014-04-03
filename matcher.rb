@@ -48,42 +48,65 @@ class Matcher
 			end
 			@snp_stats[snp] = { :match => matching, :mismatch => mismatch, :missing => unknown, :total => matching+mismatch+unknown }
 		end
+
 		pbar.finish
+
+		# Sample from @snp_stats to get expected distribution
+		@sampled_mismatch_probs = []
+		1.upto(@config[:sampling_iterations]) do |i|
+			prob = 1
+			@snp_stats.each do |snp,stat|
+				#puts stat.inspect
+				outcomes = [ :match, :mismatch, :missing ]
+				probs = normalize_cnts([ stat[:match] , stat[:mismatch], stat[:missing] ].map { |s| s.to_f / stat[:total] })
+				#puts probs.inspect
+				prob = prob*probs[1] if outcomes.random_select(probs) == :mismatch
+			end
+			@sampled_mismatch_probs << prob
+		end
+
+#		File.open("mismatch_probs.txt", "w") do |file|
+#			sampled_probs.each do |i|
+#				file.puts i
+#			end
+#		end
+
 		# calculate e-values and p-values
 		@individual_match = {}
 		@test_genotypes.individuals.each do |indv|
-			pvalue = 1
+			prob = 1
+			nmismatch = 0
 			if @mismatches[indv].nil? then
-				evalue = "NA" 
+				pvalue = 1
+				evalue = @test_genotypes.individuals.size 
 			else
 				@mismatches[indv].each do |snp| 
-					pvalue = pvalue  * (@snp_stats[snp][:mismatch].to_f / @snp_stats[snp][:total].to_f)
+					prob = prob  * (@snp_stats[snp][:mismatch].to_f / (@snp_stats[snp][:mismatch].to_f + @snp_stats[snp][:match].to_f))
+
 				end
+
+				pvalue =  pscore_to_pvalue(@sampled_mismatch_probs,prob) 
+			
 				# Ok, this is messy. We want to take into account that some SNPs may be missing.
 				avg_samples = (@mismatches[indv].map { |snp| @snp_stats[snp][:total] }).inject { |r,v| r+v } / @mismatches[indv].size.to_f
 				evalue = pvalue * avg_samples
+				nmismatch = @mismatches[indv].size
 			end
-			@individual_match[indv] = { :pvalue => pvalue, :evalue => evalue } 
+			@individual_match[indv] = { :indv => indv, :prob => prob, :pvalue => pvalue, :evalue => evalue, :nmismatch => nmismatch }
 		end
 	end
 
 	def create_match_report(output_file)
-		File.open(output_file,"w") do |file|
-			file.puts "ID\tNMISMATCH\tERATE\tP-VALUE\tE-VALUE"
-			(@mismatches.to_a.map { |k,v| [v.size,v,k] }).sort.reverse.each do |numsnps,snps,particid| 
-				pvalue = 1
-				# Calculate a p-value for particid (probability of seing this particular combination of mismatches at random) 
-				snps.each { |snp| pvalue = pvalue * (@snp_stats[snp][:mismatch].to_f / @snp_stats[snp][:total].to_f) }
-				# In the same breath, calculate average number of samples for the compared snps 
-				avg_samples = (snps.map { |snp| @snp_stats[snp][:total] }).inject { |r,v| r+v } / snps.size.to_f
-				# Calculate e-value:
-				evalue = avg_samples * pvalue
-				if pvalue < @config[:p_max] and evalue < @config[:e_max]
-					file.puts "#{particid}\t#{numsnps}\t#{numsnps.to_f/@barcode_genotypes.snps.size}\t#{pvalue}\t#{evalue}"
-				end
-			end
+		indvs = []
+		@individual_match.each { |_,v| indvs << v }
+		keys = indvs.first.keys
+	
+		indvs = indvs.sort_by {  |a| a[:pvalue] } # <=> b[:pvalue] }
+
+		File.open(output_file, "w") do |file|
+			file.puts (keys.map { |x| x.upcase }).join("\t")
+			indvs.each { |i| file.puts (keys.map { |k| i[k] }).join("\t") }
 		end
-		puts "#{@mismatches.size} samples with barcoding errors written to #{output_file}"
 	end
 
 	def swap_match
@@ -126,7 +149,7 @@ class Matcher
 				#p_score = p_score * binomial_factor
 
 
-				p_value = pscore_to_pvalue(p_score)
+				p_value = pscore_to_pvalue(@pscores,p_score)
 					
 				#inf_ratio = ld_inflation_ratio(mismatch,matching,p_value)
 				#p_value = p_value * inf_ratio
@@ -255,16 +278,16 @@ class Matcher
 		p_scores.sort
 	end
 
-	def pscore_to_pvalue(pscore)
+	def pscore_to_pvalue(pscores,pscore)
 		left = 0
-		right = @pscores.size-1
+		right = pscores.size-1
 		i = right / 2
 		
 		while left != right and right - left != 1 
 			
 			#sleep(0.1)
 			#puts "#{i} #{left} #{right}"
-			if @pscores[i] < pscore then
+			if pscores[i] < pscore then
 				left = i 
 			else
 				right = i
@@ -272,7 +295,7 @@ class Matcher
 			i = left + ((right - left) / 2).to_i
 		end
 		
-		ret = (1+i).to_f / @pscores.size.to_f
+		ret = (1+i).to_f / pscores.size.to_f
 		#puts "pscore = #{pscore} #{i} #{ret} #{@pscores.size}"
 		ret
 	end	
