@@ -5,7 +5,7 @@
 
 require 'optparse'
 
-# DF is a simplistic sequential data file reader with some data.frame like capabilities,
+# DF is a simplistic sequential data file reader with R data.frame like capabilities,
 # but without having to load the whole thing into memory
 class DF
 	def initialize(file,opts=nil) 
@@ -33,7 +33,6 @@ class DF
 					0.upto(@field_names.size-1) { |i| @field_name_indices[@field_names[i]] = i }
 					next
 				end
-				#next if not @opts[:skip].nil? and lineno =< @opts[:skip] 
 
 				extract_line_fields = []
 
@@ -55,16 +54,8 @@ class DF
 			end
 		end
 	end
-
-	def select(fields) 
-
-	end
 end
 
-# Example:
-#DataFile.new("plink.lmiss").each(2,"SNP") do |chr,snp|
-#	puts snp + " - " + chr
-#end 
 
 # Add a method to calculate binomial coefficients to the Integer class
 class Integer
@@ -75,6 +66,7 @@ class Integer
 	end
 end
 
+# Represent a Binomial
 class Binomial
 	attr_reader :top, :bottom
 	def initialize(top,bottom)
@@ -90,6 +82,7 @@ class Binomial
 	end
 end
 
+# Extend Array class with capabilities for sampling random elements
 class Array
 	def sum
 		if self.size == 0
@@ -99,6 +92,7 @@ class Array
 		end
 	end
 
+	# Select a random element with given (or uniform) probability
 	def random_select(probs=nil)
 		threshold = rand
 
@@ -115,6 +109,7 @@ class Array
 		self[self.size-1]	
 	end
 
+	# Sample n elements without replacement
 	def sample_n(n,probs=nil)
 		samples = []
 		throw "Cannot samples #{n} from an array of size #{self.size}" if n > self.size
@@ -157,7 +152,6 @@ def make_numeric_geno
 end
 
 # This class handles loading of plink files
-
 class Genotypes
 	attr_accessor :snps		# list of snps in plink-file (from .map file)
 	attr_accessor :individuals	# list of individual ids (IID) in plink. We require these to be unique
@@ -270,7 +264,6 @@ class Genotypes
 
 	def to_s
 		"#{individuals.size}x#{snps.size} genotype matrix"
-		#"#{individuals.size}x#{snps.size} genotype matrix #{snps.inspect}"
 	end
 
 	# Create a random set of genotypes for one individual, in corrspondence with genotype frequencies
@@ -349,12 +342,6 @@ class Matcher
 			@sampled_mismatch_probs << prob
 		end
 
-#		File.open("mismatch_probs.txt", "w") do |file|
-#			sampled_probs.each do |i|
-#				file.puts i
-#			end
-#		end
-
 		# calculate e-values and p-values
 		@individual_match = {}
 		@test_genotypes.individuals.each do |indv|
@@ -430,20 +417,10 @@ class Matcher
 				mismatch.size.downto(1) do |s|
 					binomial_factor = binomial_factor +  Binomial.new(matching.size+mismatch.size, mismatch.size).to_i
 				end
-				#p_score = p_score * binomial_factor
-
 
 				p_value = pscore_to_pvalue(@pscores,p_score)
-					
-				#inf_ratio = ld_inflation_ratio(mismatch,matching,p_value)
-				#p_value = p_value * inf_ratio
-				
-				#p_value = (p_value > 1) ? 1 : p_value # cap p-value at 1
- 
 				e_value = @test_genotypes.individuals.size*p_value
 
-
-				#posterior_prob = (1-p_value) * (@config[:peturb]+(1-@individual_match[indv_bar][:pvalue])) * (@config[:peturb]+(1-@individual_match[indv_test][:pvalue]))
 				posterior_prob = (1-p_score) * (@config[:peturb]+(1-@individual_match[indv_bar][:prob])) * (@config[:peturb]+(1-@individual_match[indv_test][:prob]))
 
 				next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
@@ -659,24 +636,24 @@ OptionParser.new do |opts|
 		@config[:e_max] = e.to_f
 	end
 
-	opts.on("-la", "--ld-adjust iterations", "Adjust for population LD structure between barcoding SNPs. Default number of iterations is 0 (Assume no LD). The more iterations the more precise the adjustment.") do |ld|
+	opts.on("--ld-adjust iterations", "Adjust for population LD structure between barcoding SNPs. Default number of iterations is 0 (Assume no LD). The more iterations the more precise the adjustment.") do |ld|
 		@config[:ld_adjust] = ld || 0
 	end
 
-	opts.on("--sampling-iterations iterations", "Calculate p-value from mismatch probability distribution") do |m|
+	opts.on("--sampling-iterations iterations", "Number of iterations to use to calculate p-value from mismatch probability distribution") do |m|
 		@config[:sampling_iterations] = m.to_i || 0
 	end
 
-	opts.on("--mismatch-probability P", "Prior mismatch probability") do |p|
-		@config[:mismatch_probability] = p.to_f
-	end
+#	opts.on("--mismatch-probability P", "Prior mismatch probability") do |p|
+#		@config[:mismatch_probability] = p.to_f
+#	end
 
-	opts.on("-w", "--mismatch-probability-weight W", "How much confidence to put in the given mismatch-probability relative to estimation from data.") do |p|
-		@config[:mismatch_probability_weight] = p.to_f
-	end
+##	opts.on("-w", "--mismatch-probability-weight W", "How much confidence to put in the given mismatch-probability relative to estimation from data.") do |p|
+#		@config[:mismatch_probability_weight] = p.to_f
+#	end
 
 	@config[:peturb] = 0
-	opts.on("--peturb 0..1", "A very small pertubation constant to ensure that no sample gets zero mismatch probability") do |p|
+	opts.on("--peturb 0..1", "A very small pertubation constant to ensure that no sample gets zero mismatch probability (default 0)") do |p|
 		@config[:peturb] = p.to_f
 	end
 
