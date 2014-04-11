@@ -224,7 +224,6 @@ class Matcher
 				num_match = 0 
 				@test_genotypes.individuals.each do |indv|
 					# map snps to match truth value and logical and 
-					# FIXME: What is 'gt' in this? CHECK! May be error.
 					if (sampled_snps.map { |snp,gt| gt == @test_genotypes[indv,snp] }).inject { |a,b| a and b } then
 						num_match = num_match + 1 
 					end
