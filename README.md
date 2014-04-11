@@ -30,7 +30,7 @@ Wunderbar expects that you have two plink file-sets: A file-set with barcoding g
 a file-set with the genotypes that you with to do barcoding against. Then to run barcoding
 you would use a command like:
 
-   ./wunderbar --barcode-file my-barcodes --file my-test-genotypes --sampling-iterations 10000 --out results
+    ./wunderbar --barcode-file my-barcodes --file my-test-genotypes --sampling-iterations 10000 --out results
 
 This will create the files ```results.mismatch``` (candidate list of mismatching samples) and ```results.swaps```
 (candidate list of mixed up samples).
