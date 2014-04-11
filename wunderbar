@@ -494,7 +494,7 @@ class Matcher
 
 				# calculate probability of seeing by chance
 				snp_probs = sampled_snps.map { |snp,gt| @test_genotypes.snp_freq[snp][gt] }
-				next if  snp_probs.include?(nil) # FIXME: this can happen if the barcode includes a genotype not included in @test_genotypes
+				next if  snp_probs.include?(nil) 
 				expected_match_prob = snp_probs.inject { |a,b| a*b }
 				expected_match = expected_match_prob * @test_genotypes.individuals.size 
 
@@ -546,9 +546,6 @@ class Matcher
 		i = right / 2
 		
 		while left != right and right - left != 1 
-			
-			#sleep(0.1)
-			#puts "#{i} #{left} #{right}"
 			if pscores[i] < pscore then
 				left = i 
 			else
@@ -557,9 +554,7 @@ class Matcher
 			i = left + ((right - left) / 2).to_i
 		end
 		
-		ret = (1+i).to_f / pscores.size.to_f
-		#puts "pscore = #{pscore} #{i} #{ret} #{@pscores.size}"
-		ret
+		(1+i).to_f / pscores.size.to_f
 	end	
 
 	
@@ -670,6 +665,7 @@ mandatory_fields.each do |field|
 end
 
 @config[:out] ||= "wunderbar"
+
 
 puts "Options in use:"
 puts @config.inspect
