@@ -61,7 +61,8 @@ To convert a binary plink file to the required format, use a command similar too
 a file-set with the genotypes that you with to do barcoding against. Then to run barcoding
 you would use a command like:</p>
 
-<p>./wunderbar --barcode-file my-barcodes --file my-test-genotypes --sampling-iterations 10000 --out results</p>
+<pre><code>./wunderbar --barcode-file my-barcodes --file my-test-genotypes --sampling-iterations 10000 --out results
+</code></pre>
 
 <p>This will create the files <code>results.mismatch</code> (candidate list of mismatching samples) and <code>results.swaps</code>
 (candidate list of mixed up samples).</p>
