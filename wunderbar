@@ -197,7 +197,7 @@ class Genotypes
 				end
 	
 				# Convert the two alleles to a number between 0-4, where 0=Missing, 1=AA, 2=AB, 3=BB
-				@genotypes << relevant_fields.map { |f| nf = f.split(" ").sort.map { |g| g.to_i }.inject { |r,e| ((r+e)-1).abs }  }
+				@genotypes << relevant_fields.map { |f| nf = f.split(" ").sort.map { |g| g.to_i }.inject { |r,e| r+e==0 ? 0 : ((r+e)-1).abs }  }
 			end
 		end
 
@@ -351,9 +351,8 @@ class Matcher
 				pvalue = 1
 				evalue = @test_genotypes.individuals.size 
 			else
-				@mismatches[indv].each do |snp| 
+				@mismatches[indv].each do |snp|
 					prob = prob  * (@snp_stats[snp][:mismatch].to_f / (@snp_stats[snp][:mismatch].to_f + @snp_stats[snp][:match].to_f))
-
 				end
 
 				pvalue =  pscore_to_pvalue(@sampled_mismatch_probs,prob) 
@@ -389,6 +388,9 @@ class Matcher
 				#pbar.inc
 				next if indv_bar == indv_test
 
+				next if @individual_match[indv_bar][:pvalue] > @config[:p_max]
+				next if @individual_match[indv_test][:pvalue] > @config[:e_max]
+
 				#next unless @mismatches.include?(indv_bar) 
 
 				unknown = 0
@@ -423,7 +425,7 @@ class Matcher
 
 				posterior_prob = (1-p_score) * (@config[:peturb]+(1-@individual_match[indv_bar][:prob])) * (@config[:peturb]+(1-@individual_match[indv_test][:prob]))
 
-				next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
+				#next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
 
 				@swaps << { :original_label => indv_test, :new_label => indv_bar, :posterior => posterior_prob, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
 			end
@@ -452,7 +454,7 @@ class Matcher
 				File.open(@config[:dot_file], "w") do |dot_file|
 					dot_file.puts "digraph G {"
 						swaps.each do |swp|
-							if swp[:posterior] > 0.95 then
+							if swp[:posterior] > @config[:dot_posterior] then
 								dot_file.puts '"' + swp[:original_label] +  '" -> "' + swp[:new_label] + '"'
 							end
 						end
@@ -655,6 +657,12 @@ OptionParser.new do |opts|
 	opts.on("--dot-file file", "Create .dot file for GraphViz to visualize swaps") do |file|
 		@config[:dot_file] = file
 	end
+
+	@config[:dot_posterior] = 0.99 
+	opts.on("--dot-posterior 0..1", "Cut-off on posterior prob-score for graphviz diagram") do |file|
+		@config[:dot_file] = file
+	end
+
 end.parse!
 
 # parse options
