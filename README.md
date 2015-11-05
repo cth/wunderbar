@@ -16,6 +16,8 @@ It is capable of reliable and sensitive detection of sample mismatches and swaps
 of numerous genotyping errors and in the presence of linkage disequibrilium between the individual 
 genotypes. It only requires a few SNPs to work well.
 
+You can find a paper describing the approach [here](http://www.ijbbb.org/papers/370-C0017.pdf).
+
 
 Usage
 =====
