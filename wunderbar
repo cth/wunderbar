@@ -288,6 +288,17 @@ class Matcher
 		puts "barcodes: " + @barcode_genotypes.to_s
 		puts "test snps: " + @test_genotypes.to_s
 
+		if @barcode_genotypes.individuals.size == 0 or @test_genotypes.individuals.size == 0 
+			abort "Cannot match genotypes of zero individuals. Exiting."
+		end
+
+
+		if @barcode_genotypes.snps.size == 0 or @test_genotypes.snps.size == 0 
+			abort "Insufficient genotypes for matching. Have you checked that positions match?" 
+		end
+
+
+
 		#puts "Sampling p-value distributions for mismatch binomials:"
 		#sample_mismatch_distributions( @config[:mismatch_adjust].to_i )
 		File.open("pvalues.txt", "w") do |file|
