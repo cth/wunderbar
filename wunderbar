@@ -389,15 +389,15 @@ class Matcher
 				next if indv_bar == indv_test
 
 				next if @individual_match[indv_bar][:pvalue] > @config[:p_max]
-				next if @individual_match[indv_test][:pvalue] > @config[:e_max]
+				next if @individual_match[indv_test][:pvalue] > @config[:p_max]
 
 				#next unless @mismatches.include?(indv_bar) 
 
 				unknown = 0
 				matching = []
 				mismatch = []
-				@test_genotypes.each_by_indv(indv_bar) do |snp,gt|
-					other_gt = @barcode_genotypes[indv_test,snp] 
+				@test_genotypes.each_by_indv(indv_test) do |snp,gt|
+					other_gt = @barcode_genotypes[indv_bar,snp] 
 
 					if nilz(gt) or nilz(other_gt) then
 						unknown = unknown + 1
