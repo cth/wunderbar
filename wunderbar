@@ -4,6 +4,7 @@
 # Christian Theil Have, 2014.
 
 require 'optparse'
+require 'set'
 
 # DF is a simplistic sequential data file reader with R data.frame like capabilities,
 # but without having to load the whole thing into memory
@@ -342,12 +343,11 @@ class Matcher
 		# Sample from @snp_stats to get expected distribution
 		@sampled_mismatch_probs = []
 		1.upto(@config[:sampling_iterations]) do |i|
+			puts "Sampling iteration #{i}"
 			prob = 1
 			@snp_stats.each do |snp,stat|
-				#puts stat.inspect
 				outcomes = [ :match, :mismatch, :missing ]
 				probs = normalize_cnts([ stat[:match] , stat[:mismatch], stat[:missing] ].map { |s| s.to_f / stat[:total] })
-				#puts probs.inspect
 				prob = prob*probs[1] if outcomes.random_select(probs) == :mismatch
 			end
 			@sampled_mismatch_probs << prob
@@ -402,6 +402,9 @@ class Matcher
 				next if @individual_match[indv_bar][:pvalue] > @config[:p_max]
 				next if @individual_match[indv_test][:pvalue] > @config[:p_max]
 
+				next if @individual_match[indv_bar][:nmismatch] > @config[:n_min]
+				next if @individual_match[indv_test][:nmismatch] > @config[:n_min]
+
 				#next unless @mismatches.include?(indv_bar) 
 
 				unknown = 0
@@ -434,31 +437,50 @@ class Matcher
 				p_value = pscore_to_pvalue(@pscores,p_score)
 				e_value = @test_genotypes.individuals.size*p_value
 
+				#posterior_prob = (1-p_score) * (@config[:peturb]+(1-@individual_match[indv_bar][:prob])) * (@config[:peturb]+(1-@individual_match[indv_test][:prob]))
 				posterior_prob = (1-p_score) * (@config[:peturb]+(1-@individual_match[indv_bar][:prob])) * (@config[:peturb]+(1-@individual_match[indv_test][:prob]))
 
 				#next if (p_value > @config[:p_max].to_f or e_value > @config[:e_max])
 
-				@swaps << { :original_label => indv_test, :new_label => indv_bar, :posterior => posterior_prob, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown } 
+				@swaps << { :original_label => indv_test, :new_label => indv_bar, :posterior => posterior_prob, :pvalue => p_value , :ld_inflation_ratio => inf_ratio , :evalue => e_value, :match => matching.size, :mismatch => mismatch.size, :unknown => unknown, :qualityscore => matching.size-mismatch.size } 
 			end
 		end
 		#pbar.finish
 	end
 
+	# An attempt to add only the right edges 
 	def create_swaps_report(out_file)
 		if @swaps.size == 0 then 
 			puts "No swaps detected"
 		else 
 			keys = @swaps.first.keys
 			swaps = @swaps.sort do |a,b| 
-				if a[:posterior] == b[:posterior] then
-					b[:pvalue] <=> a[:pvalue]
+				if a[:qualityscore] == b[:qualityscore] then
+					b[:qualityscore] <=> a[:qualityscore]
 				else
-					a[:posterior] <=> b[:posterior]
+					a[:qualityscore] <=> b[:qualityscore]
 				end
 			end.reverse
+
+
+			from = Set.new []	
+			to = Set.new []
+
+			good_swaps = []
+
+			swaps.each do |swp| 
+				# Skip edges that include nodes that we have already accounted for 
+				next if from.include?(swp[:original_label]) or to.include?(swp[:new_label])
+
+				from.add(swp[:original_label])
+				to.add(swp[:new_label])
+
+				good_swaps << swp
+			end
+
 			File.open(out_file, "w") do |file|
 				file.puts (keys.map { |x| x.upcase }).join("\t")
-				swaps.each { |swp| file.puts (keys.map { |k| swp[k] }).join("\t") }
+				good_swaps.each { |swp| file.puts (keys.map { |k| swp[k] }).join("\t") }
 			end
 
 			if not @config[:dot_file].nil? then 
@@ -474,6 +496,10 @@ class Matcher
 			end
 		end
 	end
+
+
+
+
 
 	# Some SNPs may in close LD, in which case we would expect
 	# an overrepresentation of certain patterns of genotypes in @test_genotypes 
@@ -644,10 +670,17 @@ OptionParser.new do |opts|
 		@config[:e_max] = e.to_f
 	end
 
+	@config[:n_min] = 1
+	opts.on("-n", "--n-min x", "Minimum number of mutations for single matches (default 1)") do |nmin|
+		@config[:n_min] = nmin.to_i
+	end
+
+	@config[:ld_adjust] = 0
 	opts.on("--ld-adjust iterations", "Adjust for population LD structure between barcoding SNPs. Default number of iterations is 0 (Assume no LD). The more iterations the more precise the adjustment.") do |ld|
 		@config[:ld_adjust] = ld || 0
 	end
 
+	@config[:sampling_iterations] = 10
 	opts.on("--sampling-iterations iterations", "Number of iterations to use to calculate p-value from mismatch probability distribution") do |m|
 		@config[:sampling_iterations] = m.to_i || 0
 	end
